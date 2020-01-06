@@ -149,8 +149,8 @@ function DbfReader(src, encodingArg) {
     error("[DbfReader] Expected a buffer, not a string");
   }
   var bin = new BinArray(src);
-  var header = readHeader(bin);
   var encoding = encodingArg || null;
+  var header = readHeader(bin, encoding);
 
   this.size = function() {return header.recordCount;};
 
@@ -179,7 +179,13 @@ function DbfReader(src, encodingArg) {
     return data;
   };
 
-  function readHeader(bin) {
+  // TODO: try not to parse header again
+  if (!encoding) {
+    var enc = getEncoding();
+    if (enc != 'ascii') header = readHeader(bin, enc);
+  }
+
+  function readHeader(bin, encoding) {
     bin.position(0).littleEndian();
     var header = {
       version: bin.readInt8(),
@@ -201,7 +207,7 @@ function DbfReader(src, encodingArg) {
 
     // Detect header terminator (LF is standard, CR has been seen in the wild)
     while (bin.peek() != 0x0D && bin.peek() != 0x0A && bin.position() < header.dataOffset - 1) {
-      field = readFieldHeader(bin);
+      field = readFieldHeader(bin, encoding);
       field.columnOffset = colOffs;
       header.fields.push(field);
       colOffs += field.size;
@@ -221,9 +227,18 @@ function DbfReader(src, encodingArg) {
     return header;
   }
 
-  function readFieldHeader(bin) {
+  function readFieldHeader(bin, encoding) {
+    var nn;
+    if(!encoding){
+      nn = bin.readCString(11);
+    } else {
+      var buf = utils.createBuffer(12);
+      var n = Dbf.readStringBytes(bin, 11, buf);
+      nn = internal.bufferToString(buf, encoding, 0, n);
+      bin.skipBytes(10 - n);
+    }
     return {
-      name: bin.readCString(11),
+      name: nn,
       type: String.fromCharCode(bin.readUint8()),
       address: bin.readUint32(),
       size: bin.readUint8(),
